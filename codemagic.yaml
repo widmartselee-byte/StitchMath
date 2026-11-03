@@ -1,0 +1,81 @@
+workflows:
+  compile-check:
+    name: Compile Check (no signing)
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Compile
+        script: |
+          xcodebuild \
+            -project "StitchMath.xcodeproj" \
+            -scheme "StitchMath" \
+            -sdk iphoneos \
+            -configuration Release \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+    artifacts:
+      - build/Build/Products/Release-iphoneos/*.app
+
+  ios-build:
+    name: Stitch Math iOS Build (App Store)
+    max_build_duration: 60
+    environment:
+      xcode: latest
+      groups:
+        - appstore_creds
+      ios_signing:
+        distribution_type: app_store
+        bundle_identifier: com.example.stitchmath
+    scripts:
+      - name: Set up code signing
+        script: |
+          keychain initialize
+          app-store-connect fetch-signing-files "com.example.stitchmath" \
+            --type IOS_APP_STORE --create
+          keychain add-certificates
+          xcode-project use-profiles
+      - name: Set build number
+        script: |
+          agvtool new-version -all $BUILD_NUMBER
+      - name: Build ipa
+        script: |
+          xcode-project build-ipa \
+            --project "StitchMath.xcodeproj" \
+            --scheme "StitchMath"
+    artifacts:
+      - build/ios/ipa/*.ipa
+
+  demo-capture:
+    name: Demo Screenshot (step one)
+    max_build_duration: 30
+    environment:
+      xcode: latest
+    scripts:
+      - name: Build for simulator
+        script: |
+          xcodebuild \
+            -project "StitchMath.xcodeproj" \
+            -scheme "StitchMath" \
+            -sdk iphonesimulator \
+            -configuration Debug \
+            -derivedDataPath build \
+            CODE_SIGNING_ALLOWED=NO \
+            build
+      - name: Capture
+        script: |
+          set -e
+          BUNDLE="com.example.stitchmath"
+          APP=$(find build/Build/Products/Debug-iphonesimulator -maxdepth 1 -name "*.app" | head -1)
+          mkdir -p capture
+          UDID=$(xcrun simctl list devices available | grep -m1 "iPhone 17 Pro Max (" | grep -oE "[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{12}")
+          xcrun simctl boot "$UDID" || true
+          xcrun simctl bootstatus "$UDID" -b
+          xcrun simctl install "$UDID" "$APP"
+          xcrun simctl launch "$UDID" "$BUNDLE"
+          sleep 4
+          xcrun simctl io "$UDID" screenshot "capture/step-one-gauge.png"
+          ls -la capture
+    artifacts:
+      - capture/*.png
